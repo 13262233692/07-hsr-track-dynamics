@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.3",
+	"Category": "Simulation",
+	"Description": "High-Speed Railway Track Dynamics Digital Testbed",
+	"Modules": [
+		{
+			"Name": "HSRTrackDynamics",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "ProceduralMeshComponent",
+			"Enabled": true
+		}
+	]
+}
