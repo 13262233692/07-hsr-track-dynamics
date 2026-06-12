@@ -115,6 +115,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Fastener|Query")
 	FVector GetRailDisplacementAtPosition(const FVector& WorldPosition) const;
 
+	UFUNCTION(BlueprintCallable, Category = "Fastener|Query")
+	int32 GetFastenerCount() const { return FastenerStates.Num(); }
+
 private:
 	void CreatePhysicsConstraint(int32 Index, UStaticMeshComponent* RailSeg, UStaticMeshComponent* SleeperBody, const FTransform& FastenerWorldTransform);
 	void ComputeNonlinearCorrection(FFastenerNodeState& NodeState);

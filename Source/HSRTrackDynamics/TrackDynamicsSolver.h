@@ -74,6 +74,30 @@ struct FSimulationDiagnostics
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	int32 ActiveFastenerCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	float CurrentStiffnessScale = 1.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	float CurrentDampingScale = 1.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	float DominantFrequency = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	float StabilityRatio = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 TotalRK4Substeps = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 EnergyCorrections = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 VelocityClamps = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	EStabilityCondition StabilityCondition = EStabilityCondition::Stable;
 };
 
 UCLASS()
@@ -120,8 +144,50 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|Mode")
 	bool bEnableIrregularity = true;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|HighSpeed")
+	bool bUseHighSpeedRK4Mode = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|HighSpeed")
+	bool bAutoDisableChaosPhysics = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|HighSpeed")
+	float RK4BaseSubstep = 1.0e-5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|HighSpeed")
+	float RK4MinSubstep = 1.0e-7f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|HighSpeed")
+	int32 RK4MaxSubstepsPerFrame = 2000;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|HighSpeed")
+	bool bAdaptiveSubstep = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|HighSpeed")
+	float ContactStiffnessScaling = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|HighSpeed")
+	float StabilitySafetyFactor = 0.7f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|HighSpeed")
+	float MinStepsPerPeriod = 30.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|Stability")
+	bool bEnableStabilityAnalysis = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|Stability")
+	bool bEnableEnergyCorrection = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|Stability")
+	float MaxEnergyGainPerStep = 0.005f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|Stability")
+	float SpeedLimitKmh = 400.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|Irregularity")
 	FRailIrregularitySpectrum IrregularitySpectrum;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solver|Components")
+	UNumericalStabilizer* NumericalStabilizer;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solver|Diagnostics")
 	FSimulationDiagnostics Diagnostics;

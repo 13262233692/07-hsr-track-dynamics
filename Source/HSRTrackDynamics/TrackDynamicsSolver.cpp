@@ -1,6 +1,7 @@
 #include "TrackDynamicsSolver.h"
 #include "HSRTrackDynamics.h"
 #include "Kismet/GameplayStatics.h"
+#include "UObject/UObjectIterator.h"
 
 ATrackDynamicsSolver::ATrackDynamicsSolver()
 {
@@ -77,6 +78,29 @@ void ATrackDynamicsSolver::InitializeSimulation()
 
 	if (TrainVehicleRef)
 	{
+		if (bUseHighSpeedRK4Mode)
+		{
+			TrainVehicleRef->bUseRK4Integration = true;
+			TrainVehicleRef->bDisableChaosPhysics = bAutoDisableChaosPhysics;
+			TrainVehicleRef->RK4BaseSubstep = RK4BaseSubstep;
+			TrainVehicleRef->RK4MinSubstep = RK4MinSubstep;
+			TrainVehicleRef->RK4MaxSubstepsPerFrame = RK4MaxSubstepsPerFrame;
+			TrainVehicleRef->bAdaptiveSubstepping = bAdaptiveSubstep;
+			TrainVehicleRef->MaxEnergyGainPerSubstep = MaxEnergyGainPerStep;
+			TrainVehicleRef->SpeedLimitKmh = SpeedLimitKmh;
+			TrainVehicleRef->CurrentStiffnessScale = ContactStiffnessScaling;
+
+			if (!NumericalStabilizer)
+			{
+				NumericalStabilizer = NewObject<UNumericalStabilizer>(this, TEXT("GlobalNumericalStabilizer"));
+				NumericalStabilizer->RegisterComponent();
+			}
+			NumericalStabilizer->StiffnessConfig.MinStepsPerPeriod = MinStepsPerPeriod;
+			NumericalStabilizer->StiffnessConfig.SafetyFactor = StabilitySafetyFactor;
+			NumericalStabilizer->StiffnessConfig.bEnableEnergyPreservation = bEnableEnergyCorrection;
+			NumericalStabilizer->StiffnessConfig.MaxEnergyGainPerStep = MaxEnergyGainPerStep;
+		}
+
 		TrainVehicleRef->InitializeVehicle();
 		UE_LOG(LogHSRTrackDynamics, Log, TEXT("Train vehicle initialized at speed %.1f m/s"),
 			TrainVehicleRef->TargetSpeed);
@@ -275,6 +299,35 @@ void ATrackDynamicsSolver::UpdateDiagnostics(float DeltaTime)
 					FMath::Abs(WRC->CurrentCreepage.LateralCreepage));
 			}
 		}
+
+		if (bUseHighSpeedRK4Mode)
+		{
+			Diagnostics.TotalRK4Substeps = TrainVehicleRef->TotalSubstepsThisFrame;
+			Diagnostics.EnergyCorrections = TrainVehicleRef->EnergyCorrectionCount;
+			Diagnostics.VelocityClamps = TrainVehicleRef->VelocityClampCount;
+			Diagnostics.CurrentStiffnessScale = TrainVehicleRef->CurrentStiffnessScale;
+			Diagnostics.CurrentDampingScale = TrainVehicleRef->CurrentDampingScale;
+			Diagnostics.DominantFrequency = TrainVehicleRef->DominantFrequency;
+
+			if (NumericalStabilizer && bEnableStabilityAnalysis)
+			{
+				FStabilityAnalysisResult Stability = NumericalStabilizer->AnalyzeStability(
+					TrainVehicleRef->DominantFrequency,
+					TrainVehicleRef->PrimarySuspension.AxleBoxSpringStiffnessZ,
+					TrainVehicleRef->WheelsetMass,
+					DeltaTime
+				);
+				Diagnostics.StabilityRatio = Stability.StabilityRatio;
+				Diagnostics.StabilityCondition = Stability.Condition;
+
+				if (Stability.Condition == EStabilityCondition::Unstable)
+				{
+					UE_LOG(LogHSRTrackDynamics, Error,
+						TEXT("STABILITY FAILURE: ratio=%.3f, freq=%.1f Hz, dt=%.3e s"),
+						Stability.StabilityRatio, Stability.HighestFrequency, Stability.CurrentDt);
+				}
+			}
+		}
 	}
 
 	Diagnostics.MaxRailDisplacement = 0.0f;
@@ -303,13 +356,39 @@ void ATrackDynamicsSolver::UpdateDiagnostics(float DeltaTime)
 
 void ATrackDynamicsSolver::LogDiagnostics()
 {
-	UE_LOG(LogHSRTrackDynamics, Log,
-		TEXT("t=%.2fs | Speed=%.1f m/s | MaxForce=%.0f N | MaxPressure=%.1f MPa | MaxRailDisp=%.4f mm | Creepage=%.5f | Fasteners=%d"),
-		Diagnostics.CurrentSimTime,
-		Diagnostics.CurrentVehicleSpeed,
-		Diagnostics.MaxWheelForce,
-		Diagnostics.MaxContactPressure / 1.0e6f,
-		Diagnostics.MaxRailDisplacement * 1000.0f,
-		Diagnostics.MaxLateralCreepage,
-		Diagnostics.ActiveFastenerCount);
+	if (bUseHighSpeedRK4Mode)
+	{
+		const TCHAR* StabilityStr = TEXT("Unknown");
+		switch (Diagnostics.StabilityCondition)
+		{
+		case EStabilityCondition::Stable: StabilityStr = TEXT("Stable"); break;
+		case EStabilityCondition::Warning: StabilityStr = TEXT("Warning"); break;
+		case EStabilityCondition::Critical: StabilityStr = TEXT("Critical"); break;
+		case EStabilityCondition::Unstable: StabilityStr = TEXT("UNSTABLE"); break;
+		}
+
+		UE_LOG(LogHSRTrackDynamics, Log,
+			TEXT("t=%.2fs | V=%.1f m/s | RK4 substeps=%d | freq=%.1f Hz | stiffScale=%.3f | dampScale=%.2f | stability=%s | EnergyCorr=%d | VelClamp=%d"),
+			Diagnostics.CurrentSimTime,
+			Diagnostics.CurrentVehicleSpeed,
+			Diagnostics.TotalRK4Substeps,
+			Diagnostics.DominantFrequency,
+			Diagnostics.CurrentStiffnessScale,
+			Diagnostics.CurrentDampingScale,
+			StabilityStr,
+			Diagnostics.EnergyCorrections,
+			Diagnostics.VelocityClamps);
+	}
+	else
+	{
+		UE_LOG(LogHSRTrackDynamics, Log,
+			TEXT("t=%.2fs | Speed=%.1f m/s | MaxForce=%.0f N | MaxPressure=%.1f MPa | MaxRailDisp=%.4f mm | Creepage=%.5f | Fasteners=%d"),
+			Diagnostics.CurrentSimTime,
+			Diagnostics.CurrentVehicleSpeed,
+			Diagnostics.MaxWheelForce,
+			Diagnostics.MaxContactPressure / 1.0e6f,
+			Diagnostics.MaxRailDisplacement * 1000.0f,
+			Diagnostics.MaxLateralCreepage,
+			Diagnostics.ActiveFastenerCount);
+	}
 }

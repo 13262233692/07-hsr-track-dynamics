@@ -4,6 +4,9 @@
 #include "GameFramework/Actor.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "WheelRailContact.h"
+#include "RK4Integrator.h"
+#include "NumericalStabilizer.h"
+#include "HighSpeedContactSolver.h"
 #include "TrainMBSVehicle.generated.h"
 
 USTRUCT(BlueprintType)
@@ -287,6 +290,48 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|Operation")
 	float TractionDerivativeGain = 1.0e3f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	bool bUseRK4Integration = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	bool bDisableChaosPhysics = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	float RK4BaseSubstep = 1.0e-5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	float RK4MinSubstep = 1.0e-7f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	int32 RK4MaxSubstepsPerFrame = 2000;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	bool bAdaptiveSubstepping = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	float ImpactVelocityThreshold = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	float WheelRailContactStiffness = 1.0e9f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	float SpeedLimitKmh = 400.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	bool bEnableVelocityClamping = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|HighSpeed")
+	float MaxAngularVelocity = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|Energy")
+	bool bEnableEnergyMonitor = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|Energy")
+	float MaxEnergyGainPerSubstep = 0.005f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|Energy")
+	float EmergencyDampingFactor = 0.9f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
 	TArray<FWheelsetDofState> WheelsetStates;
 
@@ -298,6 +343,33 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
 	TArray<FContactPatchResult> WheelContactResults;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
+	TArray<FRK4WheelsetState> RK4WheelsetStates;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
+	FRK4CarBodyState RK4CarBodyState;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
+	float TotalMechanicalEnergy = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
+	float DominantFrequency = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
+	int32 TotalSubstepsThisFrame = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
+	int32 VelocityClampCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
+	int32 EnergyCorrectionCount = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
+	float CurrentStiffnessScale = 1.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|State")
+	float CurrentDampingScale = 1.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|Components")
 	TArray<UStaticMeshComponent*> WheelsetBodies;
@@ -317,11 +389,65 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|Components")
 	TArray<UWheelRailContact*> WheelRailContacts;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|Components")
+	UNumericalStabilizer* NumericalStabilizer;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|Components")
+	UHighSpeedContactSolver* HighSpeedContactSolver;
+
 	UFUNCTION(BlueprintCallable, Category = "MBS|Setup")
 	void InitializeVehicle();
 
 	UFUNCTION(BlueprintCallable, Category = "MBS|Physics")
 	void StepMBSDynamics(float DeltaTime);
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|HighSpeed")
+	void StepRK4Dynamics(float DeltaTime);
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|HighSpeed")
+	void InitializeRK4States();
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|HighSpeed")
+	FRK4WheelsetDerivative ComputeWheelsetRK4Derivative(
+		const FRK4WheelsetState& State, float Time, int32 WheelsetIdx);
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|HighSpeed")
+	FRK4CarBodyDerivative ComputeCarBodyRK4Derivative(
+		const FRK4CarBodyState& State, float Time);
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|HighSpeed")
+	void ComputeSuspensionForcesRK4(
+		int32 WheelsetIdx,
+		const FRK4WheelsetState& WSState,
+		float Time,
+		FVector& OutLinearForce,
+		FVector& OutTorque);
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|HighSpeed")
+	float ComputeAdaptiveSubstepSize(
+		float BaseDt,
+		const FRK4WheelsetState& State) const;
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|Energy")
+	float ComputeTotalMechanicalEnergy() const;
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|Energy")
+	float ComputeWheelsetKineticEnergy(int32 WheelsetIdx) const;
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|Energy")
+	float ComputeCarBodyKineticEnergy() const;
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|Energy")
+	float ComputePotentialEnergy() const;
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|Safety")
+	void ClampVelocitiesToLimits();
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|Safety")
+	void ApplyEnergyCorrection();
+
+	UFUNCTION(BlueprintCallable, Category = "MBS|Safety")
+	bool CheckStabilityCondition();
 
 	UFUNCTION(BlueprintCallable, Category = "MBS|Physics")
 	void ComputeWheelRailForces();
