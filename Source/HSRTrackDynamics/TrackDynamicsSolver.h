@@ -98,6 +98,27 @@ struct FSimulationDiagnostics
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	EStabilityCondition StabilityCondition = EStabilityCondition::Stable;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	float DerailmentCoefficient = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	float LoadReductionRatio = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	float PeakVerticalAccel = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	float PeakCarbodyVertAccel = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	bool bDerailmentImminent = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	float MaxSettlementDepth = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	float MaxStiffnessReduction = 0.0f;
 };
 
 UCLASS()
@@ -119,6 +140,12 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|Refs")
 	ATrainMBSVehicle* TrainVehicleRef;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|Refs")
+	class ASubsidenceOperator* SubsidenceOperatorRef;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solver|Components")
+	class UDerailmentAssessor* DerailmentAssessor;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solver|Timing")
 	float PhysicsSubstepSize = 0.001f;

@@ -7,6 +7,7 @@
 #include "RK4Integrator.h"
 #include "NumericalStabilizer.h"
 #include "HighSpeedContactSolver.h"
+#include "DerailmentAssessor.h"
 #include "TrainMBSVehicle.generated.h"
 
 USTRUCT(BlueprintType)
@@ -394,6 +395,12 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|Components")
 	UHighSpeedContactSolver* HighSpeedContactSolver;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MBS|Components")
+	class UDerailmentAssessor* DerailmentAssessor;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MBS|Refs")
+	class ASubsidenceOperator* SubsidenceOperatorRef;
 
 	UFUNCTION(BlueprintCallable, Category = "MBS|Setup")
 	void InitializeVehicle();

@@ -66,6 +66,14 @@ void ATrainMBSVehicle::InitializeVehicle()
 		}
 	}
 
+	if (!DerailmentAssessor)
+	{
+		DerailmentAssessor = NewObject<UDerailmentAssessor>(this, TEXT("DerailmentAssessor"));
+		DerailmentAssessor->RegisterComponent();
+		DerailmentAssessor->StaticWheelLoad = AxleLoad / 2.0f;
+		DerailmentAssessor->NumWheels = NUM_WHEELS;
+	}
+
 	UE_LOG(LogHSRTrackDynamics, Log, TEXT("MBS Vehicle initialized: %d wheelsets, %d bogies, %d wheels"),
 		NUM_WHEELSETS, NUM_BOGIES, NUM_WHEELS);
 }

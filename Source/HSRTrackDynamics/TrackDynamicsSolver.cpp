@@ -1,7 +1,8 @@
 #include "TrackDynamicsSolver.h"
 #include "HSRTrackDynamics.h"
 #include "Kismet/GameplayStatics.h"
-#include "UObject/UObjectIterator.h"
+#include "SubsidenceOperator.h"
+#include "DerailmentAssessor.h"
 
 ATrackDynamicsSolver::ATrackDynamicsSolver()
 {
@@ -67,6 +68,32 @@ void ATrackDynamicsSolver::InitializeSimulation()
 		{
 			TrainVehicleRef = Cast<ATrainMBSVehicle>(FoundActors[0]);
 		}
+	}
+
+	if (!SubsidenceOperatorRef)
+	{
+		TArray<AActor*> FoundActors;
+		UGameplayStatics::GetAllActorsOfClass(GetWorld(), ASubsidenceOperator::StaticClass(), FoundActors);
+		if (FoundActors.Num() > 0)
+		{
+			SubsidenceOperatorRef = Cast<ASubsidenceOperator>(FoundActors[0]);
+		}
+	}
+
+	if (SubsidenceOperatorRef)
+	{
+		if (!SubsidenceOperatorRef->TrackGeneratorRef) SubsidenceOperatorRef->TrackGeneratorRef = TrackGeneratorRef;
+		if (!SubsidenceOperatorRef->FastenerGridRef) SubsidenceOperatorRef->FastenerGridRef = FastenerGridRef;
+		UE_LOG(LogHSRTrackDynamics, Log, TEXT("Subsidence operator linked"));
+	}
+
+	if (!DerailmentAssessor)
+	{
+		DerailmentAssessor = NewObject<UDerailmentAssessor>(this, TEXT("DerailmentAssessor"));
+		DerailmentAssessor->RegisterComponent();
+		DerailmentAssessor->StaticWheelLoad = TrainVehicleRef ? TrainVehicleRef->AxleLoad / 2.0f : 8500.0f;
+		DerailmentAssessor->NumWheels = TrainVehicleRef ? 8 : 8;
+		UE_LOG(LogHSRTrackDynamics, Log, TEXT("Derailment assessor initialized"));
 	}
 
 	if (TrackGeneratorRef && FastenerGridRef)
@@ -330,6 +357,52 @@ void ATrackDynamicsSolver::UpdateDiagnostics(float DeltaTime)
 		}
 	}
 
+	if (DerailmentAssessor && TrainVehicleRef)
+	{
+		DerailmentAssessor->CurrentSpeed = TrainVehicleRef->GetCurrentSpeed();
+
+		int32 NumW = TrainVehicleRef->WheelContactResults.Num();
+		DerailmentAssessor->WheelLateralForces.SetNum(NumW);
+		DerailmentAssessor->WheelVerticalForces.SetNum(NumW);
+		DerailmentAssessor->WheelVerticalAccelerations.SetNum(NumW);
+		DerailmentAssessor->WheelLateralAccelerations.SetNum(NumW);
+
+		for (int32 i = 0; i < NumW; ++i)
+		{
+			const FContactPatchResult& Contact = TrainVehicleRef->WheelContactResults[i];
+			DerailmentAssessor->WheelLateralForces[i] = Contact.TangentialForce.Y;
+			DerailmentAssessor->WheelVerticalForces[i] = Contact.NormalForce;
+			DerailmentAssessor->WheelVerticalAccelerations[i] = 0.0f;
+			DerailmentAssessor->WheelLateralAccelerations[i] = 0.0f;
+
+			if (TrainVehicleRef->WheelRailContacts.IsValidIndex(i) && TrainVehicleRef->WheelRailContacts[i])
+			{
+				DerailmentAssessor->WheelVerticalAccelerations[i] = TrainVehicleRef->WheelRailContacts[i]->WheelVelocity.Z;
+				DerailmentAssessor->WheelLateralAccelerations[i] = TrainVehicleRef->WheelRailContacts[i]->WheelVelocity.Y;
+			}
+		}
+
+		if (TrainVehicleRef->bUseRK4Integration)
+		{
+			DerailmentAssessor->CarbodyVerticalAcceleration = TrainVehicleRef->RK4CarBodyState.AngularVelocity.X;
+			DerailmentAssessor->CarbodyLateralAcceleration = TrainVehicleRef->RK4CarBodyState.Velocity.Y;
+		}
+
+		DerailmentAssessor->ComputeDerailmentAssessment();
+
+		Diagnostics.DerailmentCoefficient = DerailmentAssessor->CurrentReport.MaxDerailmentCoefficient;
+		Diagnostics.LoadReductionRatio = DerailmentAssessor->CurrentReport.MaxLoadReductionRatio;
+		Diagnostics.PeakVerticalAccel = DerailmentAssessor->CurrentReport.PeakVerticalAcceleration;
+		Diagnostics.PeakCarbodyVertAccel = DerailmentAssessor->CurrentReport.MaxCarbodyVerticalAccel;
+		Diagnostics.bDerailmentImminent = DerailmentAssessor->CurrentReport.bDerailmentImminent;
+	}
+
+	if (SubsidenceOperatorRef)
+	{
+		Diagnostics.MaxSettlementDepth = SubsidenceOperatorRef->MaxSettlementDepth;
+		Diagnostics.MaxStiffnessReduction = SubsidenceOperatorRef->MaxStiffnessReductionApplied;
+	}
+
 	Diagnostics.MaxRailDisplacement = 0.0f;
 	if (FastenerGridRef)
 	{
@@ -368,16 +441,26 @@ void ATrackDynamicsSolver::LogDiagnostics()
 		}
 
 		UE_LOG(LogHSRTrackDynamics, Log,
-			TEXT("t=%.2fs | V=%.1f m/s | RK4 substeps=%d | freq=%.1f Hz | stiffScale=%.3f | dampScale=%.2f | stability=%s | EnergyCorr=%d | VelClamp=%d"),
+			TEXT("t=%.2fs | V=%.1f km/h | RK4=%d | Q/P=%.3f | ΔP/P₀=%.1f%% | VertAccel=%.2fg | CarbodyVert=%.2fg | Settlement=%.1fmm | StiffReduction=%.1f%% | stability=%s"),
 			Diagnostics.CurrentSimTime,
-			Diagnostics.CurrentVehicleSpeed,
+			Diagnostics.CurrentVehicleSpeed * 3.6f,
 			Diagnostics.TotalRK4Substeps,
-			Diagnostics.DominantFrequency,
-			Diagnostics.CurrentStiffnessScale,
-			Diagnostics.CurrentDampingScale,
-			StabilityStr,
-			Diagnostics.EnergyCorrections,
-			Diagnostics.VelocityClamps);
+			Diagnostics.DerailmentCoefficient,
+			Diagnostics.LoadReductionRatio * 100.0f,
+			Diagnostics.PeakVerticalAccel / 9.81f,
+			Diagnostics.PeakCarbodyVertAccel / 9.81f,
+			Diagnostics.MaxSettlementDepth * 1000.0f,
+			Diagnostics.MaxStiffnessReduction * 100.0f,
+			StabilityStr);
+
+		if (Diagnostics.bDerailmentImminent)
+		{
+			UE_LOG(LogHSRTrackDynamics, Error,
+				TEXT("!!! DERAILMENT ALERT !!! Q/P=%.3f exceeds Nadal limit | ΔP/P₀=%.1f%% | Carbody VertAccel=%.2fg"),
+				Diagnostics.DerailmentCoefficient,
+				Diagnostics.LoadReductionRatio * 100.0f,
+				Diagnostics.PeakCarbodyVertAccel / 9.81f);
+		}
 	}
 	else
 	{
